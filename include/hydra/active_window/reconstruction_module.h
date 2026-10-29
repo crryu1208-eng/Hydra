@@ -40,6 +40,7 @@
 #include "hydra/active_window/active_window_module.h"
 #include "hydra/reconstruction/mesh_integrator_config.h"
 #include "hydra/reconstruction/projective_integrator.h"
+#include "hydra/utils/observation_recorder.h"
 
 namespace hydra {
 
@@ -54,6 +55,8 @@ class ReconstructionModule : public ActiveWindowModule {
     ProjectiveIntegrator::Config tsdf;
     MeshIntegratorConfig mesh;
     config::VirtualConfig<RobotFootprintIntegrator> robot_footprint;
+    //! Optional recording of every valid color observation received
+    ObservationRecorder::Config observation_recorder;
   } const config;
 
   ReconstructionModule(const Config& config, const OutputQueue::Ptr& output_queue);
@@ -61,6 +64,11 @@ class ReconstructionModule : public ActiveWindowModule {
   virtual ~ReconstructionModule();
 
   std::string printInfo() const override;
+
+  void stop() override;
+
+  //! Recorder for received observations (nullptr when disabled)
+  ObservationRecorder* observationRecorder() const { return recorder_.get(); }
 
  protected:
   bool shouldUpdate(uint64_t timestamp_ns) const;
@@ -73,6 +81,7 @@ class ReconstructionModule : public ActiveWindowModule {
   std::unique_ptr<ProjectiveIntegrator> tsdf_integrator_;
   std::unique_ptr<MeshIntegrator> mesh_integrator_;
   std::unique_ptr<RobotFootprintIntegrator> footprint_integrator_;
+  std::unique_ptr<ObservationRecorder> recorder_;
 };
 
 void declare_config(ReconstructionModule::Config& config);

@@ -49,6 +49,7 @@ add_executable(
   utils/test_active_window_tracker.cpp
   utils/test_minimum_spanning_tree.cpp
   utils/test_nearest_neighbor_utilities.cpp
+  utils/test_observation_recorder.cpp
   utils/test_timing_utilities.cpp
 )
 target_include_directories(

@@ -9,6 +9,7 @@ target_sources(
           ${CMAKE_CURRENT_SOURCE_DIR}/mesh_utilities.cpp
           ${CMAKE_CURRENT_SOURCE_DIR}/minimum_spanning_tree.cpp
           ${CMAKE_CURRENT_SOURCE_DIR}/nearest_neighbor_utilities.cpp
+          ${CMAKE_CURRENT_SOURCE_DIR}/observation_recorder.cpp
           ${CMAKE_CURRENT_SOURCE_DIR}/pgmo_glog_sink.cpp
           ${CMAKE_CURRENT_SOURCE_DIR}/pgmo_mesh_interface.cpp
           ${CMAKE_CURRENT_SOURCE_DIR}/pgmo_mesh_traits.cpp

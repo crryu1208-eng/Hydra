@@ -88,6 +88,7 @@ void declare_config(ReconstructionModule::Config& config) {
   field(config.mesh, "mesh");
   config.robot_footprint.setOptional();
   field(config.robot_footprint, "robot_footprint");
+  field(config.observation_recorder, "observation_recorder");
 }
 
 ReconstructionModule::ReconstructionModule(const Config& config,
@@ -97,14 +98,31 @@ ReconstructionModule::ReconstructionModule(const Config& config,
       last_update_ns_(std::nullopt),
       tsdf_integrator_(std::make_unique<ProjectiveIntegrator>(config.tsdf)),
       mesh_integrator_(std::make_unique<MeshIntegrator>(config.mesh)),
-      footprint_integrator_(config.robot_footprint.create()) {
+      footprint_integrator_(config.robot_footprint.create()),
+      recorder_(config.observation_recorder.enable
+                    ? std::make_unique<ObservationRecorder>(config.observation_recorder)
+                    : nullptr) {
   if (config.tsdf.semantic_integrator && !map_.config.with_semantics) {
     LOG(ERROR)
         << "Semantic integrator specified but map does not contain semantic layer!";
   }
 }
 
-ReconstructionModule::~ReconstructionModule() {}
+ReconstructionModule::~ReconstructionModule() {
+  // make sure the spin thread is not still feeding the recorder
+  ActiveWindowModule::stopImpl();
+  if (recorder_) {
+    recorder_->stop();
+  }
+}
+
+void ReconstructionModule::stop() {
+  ActiveWindowModule::stop();
+  if (recorder_) {
+    // flushes every pending frame to disk before returning
+    recorder_->stop();
+  }
+}
 
 std::string ReconstructionModule::printInfo() const {
   return config::toString(config) + "\n" + Sink::printSinks(sinks_);
@@ -122,6 +140,9 @@ bool ReconstructionModule::shouldUpdate(uint64_t timestamp_ns) const {
 ActiveWindowOutput::Ptr ReconstructionModule::spinOnce(const InputPacket& msg) {
   if (!msg.sensor_input) {
     LOG(ERROR) << "[Hydra Reconstruction] received invalid sensor data in input!";
+    if (recorder_) {
+      recorder_->recordInvalid(msg, "missing sensor input");
+    }
     return nullptr;
   }
 
@@ -142,6 +163,9 @@ ActiveWindowOutput::Ptr ReconstructionModule::spinOnce(const InputPacket& msg) {
   // force semantic normalization if volumetric map has semantic layer
   InputData::Ptr data = conversions::parseInputPacket(msg, false, map_.hasSemantics());
   if (!data) {
+    if (recorder_) {
+      recorder_->recordInvalid(msg, "input conversion failed");
+    }
     return nullptr;
   }
 
@@ -165,7 +189,14 @@ ActiveWindowOutput::Ptr ReconstructionModule::spinOnce(const InputPacket& msg) {
   }  // timing scope
 
   auto& tsdf = map_.getTsdfLayer();
-  if (tsdf.numBlocks() == 0 || !do_full_update) {
+  const bool produces_output = tsdf.numBlocks() != 0 && do_full_update;
+  if (recorder_) {
+    // every converted input is recorded, not only the ones producing an output
+    ScopedTimer timer("reconstruction/record_observation", timestamp_ns);
+    recorder_->record(msg, *data, produces_output);
+  }
+
+  if (!produces_output) {
     return nullptr;
   }
 
