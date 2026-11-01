@@ -57,6 +57,8 @@ std::shared_ptr<Camera> makeCamera(const std::string& name) {
   config.cy = 1.5f;
   config.fx = 3.0f;
   config.fy = 3.0f;
+  config.min_range = 0.1;  // Sensor config requires min_range > 0
+  config.max_range = 10.0;
   ParamSensorExtrinsics::Config extrinsics;
   extrinsics.body_p_sensor = Eigen::Vector3d(0.1, 0.2, 0.3);
   config.extrinsics = extrinsics;
