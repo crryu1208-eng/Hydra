@@ -132,6 +132,22 @@ def test_unmapped_outside_limits():
     assert nodes[symbol("a", 0)].frames == [3]
 
 
+def test_unmapped_reason_independent_of_candidate_order():
+    # the near node is only rotated too far; a later, far node must not mask that reason
+    nodes = make_nodes([trans(0.0), trans(3.0)], [BASE_NS, BASE_NS + 400_000_000])
+    config = mo.MappingConfig(max_anchor_dt_s=0.5, max_anchor_distance_m=1.0,
+                              max_anchor_angle_deg=30.0)
+    frames = [make_frame(0, BASE_NS + 100_000_000, rot_z(math.radians(90)))]
+    results = mo.map_observations(frames, nodes, config)
+    assert results[0]["mapping"] == {"type": "unmapped", "status": "outside_rotation"}
+
+    # same nodes in the opposite time order
+    nodes = make_nodes([trans(3.0), trans(0.0)], [BASE_NS, BASE_NS + 400_000_000])
+    frames = [make_frame(0, BASE_NS + 300_000_000, rot_z(math.radians(90)))]
+    results = mo.map_observations(frames, nodes, config)
+    assert results[0]["mapping"] == {"type": "unmapped", "status": "outside_rotation"}
+
+
 def test_no_nodes_and_invalid_frames():
     frames = [make_frame(0, BASE_NS, trans(0.0)),
               {"frame_id": 1, "status": "invalid_input", "world_T_body": None,

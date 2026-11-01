@@ -266,20 +266,30 @@ def map_frame(frame, nodes_by_time, stamps, config: MappingConfig):
 
     max_angle = math.radians(config.max_anchor_angle_deg)
     best = None
+    # when every candidate is rejected, report the check that the closest-to-passing
+    # candidate failed: a node within distance but rotated beyond the limit is reported as
+    # outside_rotation even if other (farther) nodes in the time window are outside_distance
+    rejection_rank = {"anchor_without_original_pose": 0, "outside_distance": 1, "outside_rotation": 2}
     rejected_reason = None
+
+    def reject(reason):
+        nonlocal rejected_reason
+        if rejected_reason is None or rejection_rank[reason] > rejection_rank[rejected_reason]:
+            rejected_reason = reason
+
     for node in candidates:
         if node.world_T_body_original is None:
-            rejected_reason = rejected_reason or "anchor_without_original_pose"
+            reject("anchor_without_original_pose")
             continue
 
         node_T_body = invert(node.world_T_body_original) @ world_T_body
         dist = float(np.linalg.norm(node_T_body[:3, 3]))
         angle = rotation_angle(node_T_body)
         if dist > config.max_anchor_distance_m:
-            rejected_reason = "outside_distance"
+            reject("outside_distance")
             continue
         if angle > max_angle:
-            rejected_reason = rejected_reason or "outside_rotation"
+            reject("outside_rotation")
             continue
 
         key = (abs(node.timestamp_ns - stamp), dist)

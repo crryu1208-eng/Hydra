@@ -117,7 +117,8 @@ Mapping policy for each frame:
    the earlier node.
 3. **unmapped**: none of the above (`no_node_within_time`, `outside_distance`,
    `outside_rotation`, `no_agent_nodes`, `invalid_input`). Frames are never forced onto
-   the nearest node.
+   the nearest node. When several nodes are in the time window, the reason is the one of
+   the node closest to passing: `outside_rotation` if any node was within distance.
 
 Corrected poses after loop closure:
 
