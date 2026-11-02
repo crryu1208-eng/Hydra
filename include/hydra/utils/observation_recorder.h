@@ -47,6 +47,7 @@
 #include <optional>
 #include <string>
 #include <thread>
+#include <vector>
 
 namespace hydra {
 
@@ -90,6 +91,9 @@ class ObservationRecorder {
     std::string depth_format = "tiff_f32";
     //! PNG compression level [0, 9]
     int png_compression = 1;
+    //! Threads encoding and writing queued frames in parallel; frame metadata lines are
+    //! still written in queue order
+    size_t num_writer_threads = 1;
   } const config;
 
   struct Stats {
@@ -194,13 +198,15 @@ class ObservationRecorder {
     //! Metadata-only entries (dropped / invalid) skip image writing
     std::string status;
     std::string error;
+    //! Position in the write order (assigned when a writer takes the frame)
+    uint64_t write_seq = 0;
   };
 
   void writeSpin();
 
   void writeFrame(PendingFrame& frame);
 
-  void writeLine(const std::string& line);
+  void writeLine(const std::string& line, uint64_t write_seq);
 
   void writeStats() const;
 
@@ -228,7 +234,12 @@ class ObservationRecorder {
   std::map<std::string, std::string> calibrations_;
 
   std::ofstream frames_file_;
-  std::unique_ptr<std::thread> write_thread_;
+  std::vector<std::thread> write_threads_;
+  //! Metadata lines are emitted in queue order even when frames finish out of order
+  uint64_t next_pop_seq_ = 0;
+  uint64_t next_line_seq_ = 0;
+  std::mutex line_mutex_;
+  std::condition_variable line_cv_;
 };
 
 void declare_config(ObservationRecorder::Config& config);

@@ -33,6 +33,8 @@
  * purposes notwithstanding any copyright notation herein.
  * -------------------------------------------------------------------------- */
 #include <gtest/gtest.h>
+
+#include <cstdio>
 #include <hydra/input/camera.h>
 #include <hydra/input/input_data.h>
 #include <hydra/input/input_packet.h>
@@ -191,6 +193,49 @@ TEST(ObservationRecorder, WritesEveryFrameWithCorrectColorAndDepth) {
 
   EXPECT_TRUE(std::filesystem::exists(dir / "camera_calib.json"));
   EXPECT_TRUE(std::filesystem::exists(dir / "recorder_stats.json"));
+  std::filesystem::remove_all(dir);
+}
+
+TEST(ObservationRecorder, ParallelWritersKeepMetadataOrder) {
+  const auto dir = makeTempDir("parallel");
+  ObservationRecorder::Config config;
+  config.enable = true;
+  config.output_path = dir;
+  config.queue_full_policy = "block";
+  config.max_queue_frames = 8;
+  config.num_writer_threads = 4;
+
+  const auto camera = makeCamera("cam");
+  {
+    ObservationRecorder recorder(config);
+    for (size_t i = 0; i < 64; ++i) {
+      auto frame = makeFrame(camera, 1700000000000000000ull + i, static_cast<uint8_t>(i));
+      EXPECT_TRUE(recorder.record(frame.packet, *frame.data, true));
+    }
+
+    recorder.stop();
+    const auto stats = recorder.stats();
+    EXPECT_EQ(stats.frames_written, 64u);
+    EXPECT_EQ(stats.depth_written, 64u);
+    EXPECT_EQ(stats.frames_write_failed, 0u);
+  }
+
+  const auto lines = readLines(dir / "frames_raw.jsonl");
+  ASSERT_EQ(lines.size(), 64u);
+  for (size_t i = 0; i < lines.size(); ++i) {
+    const auto token = "\"frame_id\": " + std::to_string(i) + ",";
+    EXPECT_NE(lines[i].find(token), std::string::npos) << "line " << i << ": " << lines[i];
+  }
+
+  for (size_t i = 0; i < 64; i += 21) {
+    char name[16];
+    std::snprintf(name, sizeof(name), "%08zu", i);
+    const cv::Mat bgr =
+        cv::imread((dir / "rgb" / (std::string(name) + ".png")).string(), cv::IMREAD_COLOR);
+    ASSERT_FALSE(bgr.empty());
+    EXPECT_EQ(bgr.at<cv::Vec3b>(1, 1)[2], i);
+  }
+
   std::filesystem::remove_all(dir);
 }
 

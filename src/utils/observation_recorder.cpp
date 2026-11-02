@@ -134,6 +134,7 @@ void declare_config(ObservationRecorder::Config& config) {
   field(config.save_depth, "save_depth");
   field(config.depth_format, "depth_format");
   field(config.png_compression, "png_compression");
+  field(config.num_writer_threads, "num_writer_threads");
   if (config.enable) {
     checkCondition(!config.output_path.empty(), "output_path required when enabled");
     checkCondition(config.max_queue_frames > 0, "max_queue_frames must be positive");
@@ -145,6 +146,7 @@ void declare_config(ObservationRecorder::Config& config) {
       config.depth_format == "tiff_f32" || config.depth_format == "png_u16_mm",
       "depth_format must be 'tiff_f32' or 'png_u16_mm'");
   checkInRange(config.png_compression, 0, 9, "png_compression");
+  checkCondition(config.num_writer_threads > 0, "num_writer_threads must be positive");
 }
 
 ObservationRecorder::ObservationRecorder(const Config& config)
@@ -177,7 +179,9 @@ ObservationRecorder::ObservationRecorder(const Config& config)
                << "; frame metadata will not be saved!";
   }
 
-  write_thread_.reset(new std::thread(&ObservationRecorder::writeSpin, this));
+  for (size_t i = 0; i < config.num_writer_threads; ++i) {
+    write_threads_.emplace_back(&ObservationRecorder::writeSpin, this);
+  }
   LOG(INFO) << "[Observation Recorder] Recording observations to "
             << config.output_path << " (queue_full_policy=" << config.queue_full_policy
             << ")";
@@ -349,7 +353,7 @@ void ObservationRecorder::enqueueMetadata(PendingFrame&& frame) {
 void ObservationRecorder::stop() {
   {
     std::lock_guard<std::mutex> lock(mutex_);
-    if (stopped_ && !write_thread_) {
+    if (stopped_ && write_threads_.empty()) {
       return;
     }
 
@@ -357,10 +361,10 @@ void ObservationRecorder::stop() {
   }
 
   queue_cv_.notify_all();
-  if (write_thread_) {
-    write_thread_->join();  // the write thread drains the queue before exiting
-    write_thread_.reset();
+  for (auto& thread : write_threads_) {
+    thread.join();  // the write threads drain the queue before exiting
   }
+  write_threads_.clear();
 
   {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -401,6 +405,7 @@ void ObservationRecorder::writeSpin() {
 
       frame = std::move(queue_.front());
       queue_.pop_front();
+      frame.write_seq = next_pop_seq_++;
     }
 
     writeFrame(frame);
@@ -451,7 +456,8 @@ bool ObservationRecorder::writeImage(const std::filesystem::path& path,
 
 void ObservationRecorder::writeFrame(PendingFrame& frame) {
   if (!frame.status.empty()) {
-    writeLine(toJsonLine(frame.info, frame.status, std::nullopt, std::nullopt, frame.error));
+    writeLine(toJsonLine(frame.info, frame.status, std::nullopt, std::nullopt, frame.error),
+              frame.write_seq);
     return;
   }
 
@@ -508,12 +514,17 @@ void ObservationRecorder::writeFrame(PendingFrame& frame) {
                        ok ? "written" : "write_failed",
                        rgb_ok ? std::optional<std::string>(rgb_rel) : std::nullopt,
                        depth_ok ? depth_rel : std::nullopt,
-                       error));
+                       error),
+            frame.write_seq);
 }
 
-void ObservationRecorder::writeLine(const std::string& line) {
+void ObservationRecorder::writeLine(const std::string& line, uint64_t write_seq) {
+  std::unique_lock<std::mutex> line_lock(line_mutex_);
+  line_cv_.wait(line_lock, [&] { return next_line_seq_ == write_seq; });
   frames_file_ << line << "\n";
   frames_file_.flush();
+  ++next_line_seq_;
+  line_cv_.notify_all();
   if (!frames_file_.good()) {
     std::lock_guard<std::mutex> lock(mutex_);
     ++stats_.metadata_write_failed;
